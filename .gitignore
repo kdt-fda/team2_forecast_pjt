@@ -209,3 +209,4 @@ __marimo__/
 # 문서 제외
 *.csv
 *.pdf
+*.txt
