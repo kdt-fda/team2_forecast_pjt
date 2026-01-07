@@ -206,6 +206,16 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
-# 문서 제외
+# DB 폴더 제외
+db/
+
+# 문서/데이터 제외
 *.csv
 *.pdf
+*.txt
+*.parquet
+
+# 캐시/가상환경 제외
+.venv/
+__pycache__/
+.vscode/
