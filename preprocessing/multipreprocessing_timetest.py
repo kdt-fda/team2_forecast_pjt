@@ -1,6 +1,7 @@
 import pandas as pd
 import os
 import numpy as np
+import time
 import sys
 from ekonlpy.sentiment import MPCK
 from multiprocessing import Pool
@@ -17,7 +18,7 @@ if sys.platform == 'win32':
     builtins.open = _patched_open
 os.environ['PYTHONUTF8'] = '1'
 
-
+# 1. 전역 변수로 선언만 해둡니다.
 worker_mpck = None
 
 # 2. 일꾼들이 처음 출근했을 때 딱 한 번만 실행할 함수
@@ -52,7 +53,7 @@ def ngramize(tokens, max_n=5):
                 covered_ranges.add(i)
     return final_ngrams
 
-# --- [2. 멀티프로세싱용 개별 일꾼(Worker) 함수] ---
+# --- [2. 멀티프로세싱 일꾼 함수] ---
 def worker_task(text_list):
     global worker_mpck
     batch_results = []
@@ -62,8 +63,8 @@ def worker_task(text_list):
             final = ngramize(tokens, max_n=5)
             batch_results.append(final)
         except Exception as e:
-            print(f"에러 발견: {e}")
-            raise e
+            print(f"❌ 분석 에러 발생: {e}")
+            batch_results.append([]) 
     return batch_results
 
 # --- [3. 메인 실행 제어기] ---
@@ -73,72 +74,33 @@ def run_production(df, output_folder='./processed_batches', batch_size=2000):
 
     num_cores = 8
     total_batches = int(np.ceil(len(df) / batch_size))
-    
-    print(f"⚙️ 총 {len(df)}건 데이터를 {num_cores}개 코어로 처리합니다.")
+    print(f"⚙️ 총 {len(df)}건을 {num_cores}개 코어로 처리합니다.")
 
     with Pool(num_cores, initializer=init_worker) as pool:
         total_batches = int(np.ceil(len(df) / batch_size))
         for i in tqdm(range(total_batches), desc="Processing Batches"):
             batch_file = os.path.join(output_folder, f"batch_{i}.parquet")
-            if os.path.exists(batch_file):
-                continue
-                
+            if os.path.exists(batch_file): continue
             start = i * batch_size
             end = min((i + 1) * batch_size, len(df))
             chunk = df.iloc[start:end].copy()
-            
             split_chunks = np.array_split(chunk['content'], num_cores)
             results = pool.map(worker_task, split_chunks)
-            
-            # 쪼개진 결과 합쳐서 컬럼에 넣기
             flat_results = [item for sublist in results for item in sublist]
             chunk['tokens'] = flat_results
-            
-            # Parquet 형식으로 저장 (csv보다 빠르고 용량이 작음)
             chunk.to_parquet(batch_file)
 
-# --- [4. 전체 실행 로직] ---
 if __name__ == "__main__":
-    import kss
-    from tqdm import tqdm
-    tqdm.pandas()
-
-    SENTENCE_FILE = 'df_sentences.parquet'
-    if os.path.exists(SENTENCE_FILE):
-        print(f"✅ 이미 쪼개진 파일({SENTENCE_FILE})을 찾았습니다. 로드 중...")
-        df_sentences = pd.read_parquet(SENTENCE_FILE)
-    else:
-        # 1. 데이터 로드 (파일이 없을 때만 원본 CSV들을 읽어옵니다)
-        print("📂 원본 데이터를 로드하고 합치는 중...")
-        news = pd.read_csv('../db/preprocessing/news_preprocessed_fixed.csv', encoding='utf-8')
-        meetings = pd.read_csv('../db/preprocessing/meeting_preprocessed_fixed.csv', encoding='utf-8')
-        reports = pd.read_csv('../db/preprocessing/final_integrated_full_v2.csv', encoding='utf-8')
-        press = pd.read_csv('../db/preprocessing/press_preprocessed_fixed.csv', encoding='utf-8')
-
-        df_total = pd.concat([news, meetings, reports, press], ignore_index=True)
-        # 3. 문서 고유 Index
-        df_total['doc_id'] = df_total.index
-        final_cols = ['date', 'content', 'tokens', 'category', 'source', 'doc_id']
-        df_total = df_total[final_cols]
-        df_total = df_total.dropna(subset=['content'])
-
-        # 2. 문장 분리 작업 (KSS는 여기서 미리 수행)
-        print("✂️ 문장 분리(KSS)를 시작합니다...")
-        df_working = df_total.copy()
-        df_working['content'] = df_working['content'].progress_apply(kss.split_sentences)
-        df_sentences = df_working.explode('content').reset_index(drop=True)
-
-        del df_total
-        del df_working
-
-        df_sentences['tokens'] = None
-        output_columns = ['doc_id', 'date', 'content', 'tokens', 'category', 'source']
-        df_sentences = df_sentences[output_columns]
-        
-        print(f"💾 쪼개진 데이터를 {SENTENCE_FILE}로 저장합니다...")
-        df_sentences.to_parquet(SENTENCE_FILE)
-
-    # 3. 멀티프로세싱 실행
-    run_production(df_sentences)
     
-    print("✨ 모든 작업이 완료되었습니다! './processed_batches' 폴더를 확인하세요.")
+    
+    SENTENCE_FILE = 'df_sentences_timetest.parquet'
+    if os.path.exists(SENTENCE_FILE):
+        print(f"✅ 파일을 로드합니다: {SENTENCE_FILE}")
+        df_sentences = pd.read_parquet(SENTENCE_FILE)
+        start_total = time.time()
+        run_production(df_sentences)
+        end_total = time.time()
+        df_sentences.to_parquet('multiprocessing_result.parquet')
+    else:
+        print("❌ 전처리된 파일이 없습니다. 1번 파일을 먼저 실행하세요.")
+    print(f"✨ 전체 소요 시간: {(end_total - start_total)/60:.2f}분")

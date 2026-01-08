@@ -212,3 +212,5 @@ __marimo__/
 *.pdf
 *.txt
 *.parquet
+*.jpg
+*.png
