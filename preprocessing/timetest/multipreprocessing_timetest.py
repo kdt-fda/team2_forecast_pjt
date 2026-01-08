@@ -100,7 +100,6 @@ if __name__ == "__main__":
         start_total = time.time()
         run_production(df_sentences)
         end_total = time.time()
-        df_sentences.to_parquet('multiprocessing_result.parquet')
     else:
         print("❌ 전처리된 파일이 없습니다. 1번 파일을 먼저 실행하세요.")
     print(f"✨ 전체 소요 시간: {(end_total - start_total)/60:.2f}분")
